@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>✨ Put Your Object ✨</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      font-family: Arial, sans-serif;
+      color: white;
+      overflow: hidden;
+    }
+    .title {
+      font-size: 24px;
+      margin-bottom: 12px;
+      font-weight: bold;
+      animation: glow 2s ease-in-out infinite alternate;
+      text-align: center;
+    }
+    @keyframes glow {
+      from {
+        text-shadow: 0 0 10px #00ffcc, 0 0 20px #00ffcc;
+        color: #ccffdd;
+      }
+      to {
+        text-shadow: 0 0 20px #ff3399, 0 0 30px #ff66cc;
+        color: #ffe6f2;
+      }
+    }
+    .container {
+      position: relative;
+      width: 90%;
+      max-width: 400px;
+      aspect-ratio: 4/3;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 6px 25px rgba(0,0,0,0.6);
+      display: none;
+      background: black;
+    }
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    video { display: none; }
+    #loading {
+      font-size: 18px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="title">✨ Put Your Object ✨</div>
+  <div id="loading">⏳ Starting camera...</div>
+
+  <div class="container" id="detector">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script>
+    async function setupCamera(video) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" }, // back camera on mobile
+            width: { ideal: 320 },
+            height: { ideal: 240 }
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        return true;
+      } catch (error) {
+        alert("Camera error: " + error.message);
+        return false;
+      }
+    }
+
+    async function main() {
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      let lastPredictions = [];
+
+      const cameraReady = await setupCamera(video);
+      if (!cameraReady) return;
+
+      video.addEventListener("loadedmetadata", () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        document.getElementById("loading").innerText = "⏳ Loading model...";
+        document.getElementById("detector").style.display = "block";
+      });
+
+      await tf.setBackend("cpu"); // stable in Firefox
+      await tf.ready();
+
+      const model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+
+      document.getElementById("loading").style.display = "none";
+
+      detectFrame(video, model, ctx, canvas, lastPredictions, 0);
+    }
+
+    async function detectFrame(video, model, ctx, canvas, lastPredictions, frameCount) {
+      // draw mirrored video
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+      ctx.restore();
+
+      // always draw predictions
+      lastPredictions.forEach(pred => {
+        const [x, y, width, height] = pred.bbox;
+        const mirroredX = canvas.width - x - width;
+
+        ctx.strokeStyle = "#00FF88";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mirroredX, y, width, height);
+
+        ctx.fillStyle = "rgba(0,255,136,0.7)";
+        ctx.font = "14px Arial";
+        ctx.fillText(`${pred.class} ${(pred.score*100).toFixed(0)}%`,
+          mirroredX + 4, y > 14 ? y - 4 : 14);
+      });
+
+      // run detection every frame (more accurate, may be a bit slower)
+      const predictions = await model.detect(video);
+      lastPredictions.length = 0;
+      lastPredictions.push(...predictions);
+
+      requestAnimationFrame(() =>
+        detectFrame(video, model, ctx, canvas, lastPredictions, frameCount + 1)
+      );
+    }
+
+    main();
+  </script>
+</body>
+</html>
